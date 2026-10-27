@@ -47,7 +47,10 @@ export interface Route {
 
 export function Routes({ routes, fallback }: { routes: Route[]; fallback: ReactNode }) {
   const { path } = useLocation();
-  useEffect(() => window.scrollTo(0, 0), [path]);
+  // Braces matter: Chrome's scrollTo returns a Promise, and an effect may only return a cleanup function.
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [path]);
   for (const route of routes) {
     const params = matchPath(route.path, path);
     // Keyed by path: a new URL gets fresh page state (quantity, selected option, page number).
@@ -57,7 +60,9 @@ export function Routes({ routes, fallback }: { routes: Route[]; fallback: ReactN
 }
 
 export function Redirect({ to }: { to: string }) {
-  useEffect(() => navigate(to, { replace: true }), [to]);
+  useEffect(() => {
+    navigate(to, { replace: true });
+  }, [to]);
   return null;
 }
 

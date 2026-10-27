@@ -38,7 +38,9 @@ export function SellerApp() {
   const { workspace } = useServices();
   const { path } = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
-  useEffect(() => setMenuOpen(false), [path]);
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [path]);
 
   if (path === '/seller' || path === '/seller/') {
     const current = workspace.get().currentMerchantId;

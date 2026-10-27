@@ -61,7 +61,9 @@ function Header() {
   // Keep the box in sync with the URL, keyed on the string value (URLSearchParams is a new object each render).
   const urlQuery = path === '/search' ? (search.get('q') ?? '') : '';
   const [q, setQ] = useState(urlQuery);
-  useEffect(() => setQ(urlQuery), [urlQuery]);
+  useEffect(() => {
+    setQ(urlQuery);
+  }, [urlQuery]);
 
   const onSearch = (e: FormEvent) => {
     e.preventDefault();
