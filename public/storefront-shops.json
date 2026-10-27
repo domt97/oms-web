@@ -1,0 +1,4 @@
+{
+  "_comment": "Featured shops on the storefront until a public catalog API exists. Add {merchantId, storeId, name} objects.",
+  "shops": []
+}
