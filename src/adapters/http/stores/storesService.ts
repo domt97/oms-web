@@ -53,13 +53,14 @@ export function createProductAdapter(http: HttpClient): ProductPort {
     create: async (merchantId, storeId, input) => toProduct(await http.post<StoreProductResponse>(`${s(merchantId, storeId)}/products`, input)),
     get: async (merchantId, storeId, productId) =>
       toProduct(await http.get<StoreProductResponse>(`${s(merchantId, storeId)}/products/${encodeURIComponent(productId)}`)),
-    list: async (merchantId, storeId, page, size) =>
+    list: async (merchantId, storeId, page, size, options) =>
       toPage(
         await http.get<PagedResult<StoreProductPreviewResponse>>(`${s(merchantId, storeId)}/products/search`, {
           pageNumber: page,
           pageSize: size,
           sortBy: 'createdAt',
           direction: 'DESC',
+          notInCollectionId: options?.notInCollectionId,
         }),
         toSummary,
       ),
@@ -76,6 +77,14 @@ export function createCollectionAdapter(http: HttpClient): CollectionPort {
   return {
     list: async (merchantId, storeId) => (await http.get<StoreCollectionResponse[]>(c(merchantId, storeId))).map(toCollection),
     get: async (merchantId, storeId, id) => toCollection(await http.get<StoreCollectionResponse>(`${c(merchantId, storeId)}/${encodeURIComponent(id)}`)),
+    products: async (merchantId, storeId, id, page, size) =>
+      toPage(
+        await http.get<PagedResult<StoreProductPreviewResponse>>(`${c(merchantId, storeId)}/${encodeURIComponent(id)}/products`, {
+          pageNumber: page,
+          pageSize: size,
+        }),
+        toSummary,
+      ),
     create: async (merchantId, storeId, input) =>
       toCollection(await http.post<StoreCollectionResponse>(c(merchantId, storeId), { ...input, productIds: [] })),
     addProducts: async (merchantId, storeId, id, productIds) =>
