@@ -128,13 +128,16 @@ export interface StorePort {
 export interface ProductPort {
   create(merchantId: string, storeId: string, input: CreateProductInput): Promise<Product>;
   get(merchantId: string, storeId: string, productId: string): Promise<Product>;
-  list(merchantId: string, storeId: string, page: number, size: number): Promise<Page<ProductSummary>>;
+  /** Newest first. `notInCollectionId` leaves out the products already in that collection of the store. */
+  list(merchantId: string, storeId: string, page: number, size: number, options?: { notInCollectionId?: string }): Promise<Page<ProductSummary>>;
   importFromS3(merchantId: string, storeId: string, bucket: string, key: string): Promise<ImportResult>;
 }
 
 export interface CollectionPort {
   list(merchantId: string, storeId: string): Promise<Collection[]>;
   get(merchantId: string, storeId: string, collectionId: string): Promise<Collection>;
+  /** Products in the collection, A→Z by name. */
+  products(merchantId: string, storeId: string, collectionId: string, page: number, size: number): Promise<Page<ProductSummary>>;
   create(merchantId: string, storeId: string, input: { name: string; description?: string }): Promise<Collection>;
   addProducts(merchantId: string, storeId: string, collectionId: string, productIds: string[]): Promise<Collection>;
   removeProducts(merchantId: string, storeId: string, collectionId: string, productIds: string[]): Promise<Collection>;

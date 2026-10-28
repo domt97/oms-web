@@ -98,8 +98,9 @@ The front end never decides real availability, prices or totals: order-service w
 
 ### 4.1 Aggregating catalog — limits (`adapters/catalog/aggregatingCatalog.ts`)
 
-The backend "search" only filters by store (no keyword, no status), has no page-size cap and no sort whitelist
-(an unknown `sortBy` returns 500), and stock is one call per product. So the adapter:
+The backend "search" only filters by store (no keyword, no status) and has no page-size cap; it orders by `createdAt`
+(or `updatedAt`, `name`, `id`) with `id` as the last key, and rejects other sort fields with 400 (stores-service, 2026-10).
+Stock is one call per product. So the adapter:
 
 - reads at most **12 shops**, with at most **4 requests in flight** per operation (one shared pool, also for cart checks), **20 products** per page (hard cap 50),
   **1 page per shop** for feed and search, sorted by `createdAt` only;
@@ -225,3 +226,4 @@ needed — then adopt react-router and TanStack Query; only `shared/lib` and its
 | 2026-10-27 | Cart problems are flagged on the line (not removed); checkout blocked until fixed (BR-CRT-03 flagging → 🟢) | owner |
 | 2026-10-27 | Max 99 per cart line (BR-CRT-02 → 🟢) | owner |
 | 2026-10-27 | Storefront shop list = featured-shops file + demo mode (same-browser Seller Centre stores) | owner |
+| 2026-10-27 | Collection page: members listed A→Z with Remove; the "Add products" picker lists only products not in the collection (`notInCollectionId`), all statuses with a badge | owner |

@@ -8,6 +8,7 @@ import type { InventoryPort, ProductPort, ShopDirectoryPort, StorePort } from '.
 import { createAggregatingCatalog, mapLimited } from './catalog/aggregatingCatalog';
 import { createHttpClient } from './http/client';
 import { toPage, toProduct, toStore, toSummary } from './http/stores/mappers';
+import { createCollectionAdapter, createProductAdapter } from './http/stores/storesService';
 
 // ---------- fixtures shaped like the Java DTOs ----------
 
@@ -80,6 +81,36 @@ describe('http client', () => {
   it('turns a network failure into status 0', async () => {
     const http = createHttpClient({ fetchImpl: async () => Promise.reject(new TypeError('fetch failed')) });
     await assert.rejects(http.get('/x'), (e: AppError) => e.status === 0 && e.isUnavailable);
+  });
+});
+
+describe('stores-service collection and product adapters', () => {
+  function recording() {
+    const urls: string[] = [];
+    const http = createHttpClient({
+      fetchImpl: async (u) => {
+        urls.push(String(u));
+        return new Response(JSON.stringify(pagedJson), { status: 200 });
+      },
+    });
+    return { urls, http };
+  }
+
+  it('lists the products of a collection with paging only', async () => {
+    const { urls, http } = recording();
+    const page = await createCollectionAdapter(http).products('m1', 's1', 'c1', 2, 20);
+    assert.equal(urls[0], '/v1/store/merchants/m1/stores/s1/collections/c1/products?pageNumber=2&pageSize=20');
+    assert.equal(page.items[0].name, 'Milk tea');
+    assert.equal(page.items[1].status, 'DRAFT');
+  });
+
+  it('sends notInCollectionId only when given', async () => {
+    const { urls, http } = recording();
+    const products = createProductAdapter(http);
+    await products.list('m1', 's1', 0, 20, { notInCollectionId: 'c1' });
+    await products.list('m1', 's1', 0, 20);
+    assert.match(urls[0], /\/products\/search\?.*notInCollectionId=c1/);
+    assert.doesNotMatch(urls[1], /notInCollectionId/);
   });
 });
 

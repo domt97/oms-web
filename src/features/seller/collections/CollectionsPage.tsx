@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { useAction, useAsync } from '../../../shared/lib/async';
 import { Link } from '../../../shared/lib/router';
 import { useServices } from '../../../shared/lib/services';
-import { Badge, Button, Card, Empty, ErrorBox, Field, Input, Loading, Textarea } from '../../../shared/ui/ui';
+import { Badge, Button, ButtonLink, Card, Empty, ErrorBox, Field, Input, Loading, Textarea } from '../../../shared/ui/ui';
 import { storeBase } from '../paths';
 import { StorePage } from '../stores/storeShared';
 
@@ -52,6 +52,7 @@ function Collections({ merchantId, storeId }: { merchantId: string; storeId: str
                   <th>Name</th>
                   <th className="num">Products</th>
                   <th>Status</th>
+                  <th />
                 </tr>
               </thead>
               <tbody>
@@ -64,6 +65,11 @@ function Collections({ merchantId, storeId }: { merchantId: string; storeId: str
                     <td className="num">{c.productCount}</td>
                     <td>
                       <Badge tone={c.status === 'ACTIVE' ? 'ok' : undefined}>{c.status === 'ACTIVE' ? 'Visible' : 'Hidden'}</Badge>
+                    </td>
+                    <td className="right">
+                      <ButtonLink to={`${base}/collections/${c.id}`} size="sm">
+                        Manage products
+                      </ButtonLink>
                     </td>
                   </tr>
                 ))}
