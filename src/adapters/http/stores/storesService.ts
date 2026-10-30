@@ -1,5 +1,5 @@
 import type { BusinessHour } from '../../../domain/store';
-import type { CollectionPort, MerchantPort, ProductPort, StorePort } from '../../../ports';
+import type { CollectionPort, MerchantPort, ProductPort, StorePort, UpdateProductInput } from '../../../ports';
 import type { HttpClient } from '../client';
 import type {
   ImportResultDto,
@@ -10,6 +10,7 @@ import type {
   StoreDetailResponse,
   StoreProductPreviewResponse,
   StoreProductResponse,
+  UpdateStoreProductRequest,
 } from './dto';
 import { toAvailability, toCollection, toMerchant, toPage, toProduct, toStore, toSummary } from './mappers';
 
@@ -53,6 +54,8 @@ export function createProductAdapter(http: HttpClient): ProductPort {
     create: async (merchantId, storeId, input) => toProduct(await http.post<StoreProductResponse>(`${s(merchantId, storeId)}/products`, input)),
     get: async (merchantId, storeId, productId) =>
       toProduct(await http.get<StoreProductResponse>(`${s(merchantId, storeId)}/products/${encodeURIComponent(productId)}`)),
+    update: async (merchantId, storeId, productId, input) =>
+      toProduct(await http.put<StoreProductResponse>(`${s(merchantId, storeId)}/products/${encodeURIComponent(productId)}`, toUpdateRequest(input))),
     list: async (merchantId, storeId, page, size, options) =>
       toPage(
         await http.get<PagedResult<StoreProductPreviewResponse>>(`${s(merchantId, storeId)}/products/search`, {
@@ -91,5 +94,30 @@ export function createCollectionAdapter(http: HttpClient): CollectionPort {
       toCollection(await http.post<StoreCollectionResponse>(`${c(merchantId, storeId)}/${encodeURIComponent(id)}/add-products`, undefined, { productIds })),
     removeProducts: async (merchantId, storeId, id, productIds) =>
       toCollection(await http.post<StoreCollectionResponse>(`${c(merchantId, storeId)}/${encodeURIComponent(id)}/remove-products`, undefined, { productIds })),
+  };
+}
+
+/** Explicit body (no spread of domain objects): exactly the fields of UpdateStoreProductRequest. */
+function toUpdateRequest(input: UpdateProductInput): UpdateStoreProductRequest {
+  return {
+    version: input.version,
+    name: input.name,
+    description: input.description,
+    thumbnailUrl: input.thumbnailUrl,
+    categoryId: input.categoryId,
+    status: input.status,
+    skus: input.skus.map((s) => ({
+      id: s.id,
+      sku: s.sku,
+      name: s.name,
+      price: s.price,
+      currency: s.currency,
+      weight: s.weight,
+      length: s.length,
+      width: s.width,
+      height: s.height,
+      status: s.status,
+    })),
+    images: input.images.map((i) => ({ imageUrl: i.imageUrl, displayOrder: i.displayOrder })),
   };
 }

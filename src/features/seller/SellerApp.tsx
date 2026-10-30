@@ -11,6 +11,7 @@ import { storeBase } from './paths';
 import { MerchantsPage } from './merchants/MerchantsPage';
 import { ProductCreatePage } from './products/ProductCreatePage';
 import { ProductDetailPage } from './products/ProductDetailPage';
+import { ProductEditPage } from './products/ProductEditPage';
 import { ProductsPage } from './products/ProductsPage';
 import { StoreClosuresPage } from './stores/StoreClosuresPage';
 import { StoreCreatePage } from './stores/StoreCreatePage';
@@ -28,6 +29,7 @@ const routes: Route[] = [
   { path: `${S}/products`, render: (p) => <ProductsPage merchantId={p.merchantId} storeId={p.storeId} /> },
   { path: `${S}/products/new`, render: (p) => <ProductCreatePage merchantId={p.merchantId} storeId={p.storeId} /> },
   { path: `${S}/products/:productId`, render: (p) => <ProductDetailPage merchantId={p.merchantId} storeId={p.storeId} productId={p.productId} /> },
+  { path: `${S}/products/:productId/edit`, render: (p) => <ProductEditPage merchantId={p.merchantId} storeId={p.storeId} productId={p.productId} /> },
   { path: `${S}/collections`, render: (p) => <CollectionsPage merchantId={p.merchantId} storeId={p.storeId} /> },
   { path: `${S}/collections/:collectionId`, render: (p) => <CollectionDetailPage merchantId={p.merchantId} storeId={p.storeId} collectionId={p.collectionId} /> },
   { path: `${S}/settings`, render: (p) => <StoreSettingsPage merchantId={p.merchantId} storeId={p.storeId} /> },
