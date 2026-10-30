@@ -169,6 +169,12 @@ version or a SKU code used by another product of the store; the page re-reads th
 (`classifyConflict`) instead of parsing the message — stale → "Reload latest" (the form is keyed by version, so it resets),
 same version → a SKU code clash: the edits are kept and the user is asked to check the new codes; if the re-read fails, only the server message is shown. Edit is hidden when the backend sends no `version`.
 
+Number fields in forms (prices, weights): take **plain decimals** (no exponent, sign or thousands separator) and check
+them in the domain (`productFormProblems`), matching the backend's precision — price ≥ 0 with ≤ 2 decimals and whole
+VND, dimensions ≤ 2 decimals. The `step` of an `<input type="number">` must match that precision (1 for VND, 0.01
+otherwise): the browser's own step check blocks submission, and a too-coarse step (e.g. 1000) silently rejects valid
+stored values. Show the formatted amount next to a price so `30.000` visibly reads as 30 đồng.
+
 Errors: one `AppError` (status, message, details). 4xx messages from oms-core `ErrorResponse` are user-facing and
 shown as-is (incl. 409, 422); **5xx text is never shown** — the user sees a generic message plus a request id.
 
