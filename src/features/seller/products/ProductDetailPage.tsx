@@ -5,7 +5,7 @@ import { formatMoney } from '../../../domain/money';
 import { useAction, useAsync } from '../../../shared/lib/async';
 import { formatDateTime, MOVEMENT_LABEL, PRODUCT_STATUS_LABEL } from '../../../shared/lib/format';
 import { useServices } from '../../../shared/lib/services';
-import { Badge, Button, Card, Empty, ErrorBox, Field, IdChip, Img, Input, Loading, PageHeader, Select, Toast } from '../../../shared/ui/ui';
+import { Badge, Button, ButtonLink, Card, Empty, ErrorBox, Field, IdChip, Img, Input, Loading, PageHeader, Select, Toast } from '../../../shared/ui/ui';
 import { merchantBase, storeBase } from '../paths';
 
 interface Props {
@@ -47,9 +47,16 @@ export function ProductDetailPage({ merchantId, storeId, productId }: Props) {
           </span>
         }
         actions={
-          <a className="btn" href={`/product/${merchantId}/${storeId}/${p.id}`}>
-            View as shopper
-          </a>
+          <span className="row">
+            {p.version != null && (
+              <ButtonLink to={`${base}/products/${p.id}/edit`} variant="primary">
+                Edit
+              </ButtonLink>
+            )}
+            <a className="btn" href={`/product/${merchantId}/${storeId}/${p.id}`}>
+              View as shopper
+            </a>
+          </span>
         }
       />
       <div className="grid grid-side">
@@ -92,10 +99,10 @@ export function ProductDetailPage({ merchantId, storeId, productId }: Props) {
               </tbody>
             </table>
           </div>
-          {stock.data && stock.data.length < p.skus.length && (
+          {stock.data && p.skus.some((sku) => !bySku.has(sku.sku)) && (
             <div className="card-body small muted">
-              Some options have no stock record yet. Stock is created asynchronously from the ProductCreated event (Debezium → Kafka); press Refresh after a few seconds. If it stays
-              empty, check the Debezium connector and inventory-service.
+              Some options have no stock record yet. Stock is created asynchronously from the ProductCreated / ProductUpdated events (Debezium → Kafka); press Refresh after a
+              few seconds. If it stays empty, check the Debezium connector and inventory-service.
             </div>
           )}
         </Card>
@@ -121,6 +128,9 @@ function SkuRow({ sku, inventory, selected, onSelect }: { sku: Sku; inventory?: 
       <td>
         <div className="mono">{sku.sku}</div>
         {sku.name && <div className="small muted">{sku.name}</div>}
+        {sku.status === 'INACTIVE' && <Badge>Not on sale</Badge>}
+        {/* BR-INV-08: inventory follows the catalog a few seconds after a change. */}
+        {inventory?.status === 'INACTIVE' && <Badge tone="warn">Not orderable</Badge>}
       </td>
       <td className="num">{formatMoney(sku.price, sku.currency)}</td>
       {inventory ? (

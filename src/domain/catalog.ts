@@ -10,6 +10,9 @@ export interface Sku {
   price: number;
   currency: string;
   weight?: number | null;
+  length?: number | null;
+  width?: number | null;
+  height?: number | null;
   status: SkuStatus;
 }
 
@@ -25,9 +28,12 @@ export interface Product {
   name: string;
   description?: string | null;
   thumbnailUrl?: string | null;
+  categoryId?: string | null;
   status: ProductStatus;
   skus: Sku[];
   images: ProductImage[];
+  /** Optimistic version for update-product; missing on backends without the update API. */
+  version?: number;
   createdAt: string;
   updatedAt: string;
 }

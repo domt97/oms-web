@@ -79,7 +79,9 @@ Only decided rules (✅ / 🟢) or rules the owner confirmed on 2026-10-27; disp
 | Shoppers see stock as a status: In stock / Only N left (N ≤ 5) / Sold out; no record = unknown, not blocking. Neither messages nor quantity caps reveal a count above 5 | `domain/inventory.ts` `stockLevel`, `domain/cart.ts` | BR-CAT-04 (🟢 2026-10-27); BR-CAT-03, BR-INV-06 |
 | Cart re-checks price/stock/availability when viewed; problems are **flagged, never removed**; blocking flags stop checkout | `domain/cart.ts` `checkLine` | BR-CRT-03 — flagging **decided 2026-10-27** |
 | "Open now" = inside today's hours in the store time zone, opening and closing minute inclusive (as `BusinessHour.isOpen`) | `domain/store.ts` `isOpenNow` | BR-STO-04 ✅ hours part; closures (🟡) are ignored — hint only |
-| Merchant-entered image URLs: only http(s) | `domain/catalog.ts` `safeImageUrl` | security |
+| Merchant-entered image URLs: only http(s) | `domain/catalog.ts` `safeImageUrl` (display); `domain/productForm.ts` `isAbsoluteHttpUrl` (forms) | security |
+| Product edit: SKU code is the identity and read-only once created; removing an option is a soft remove (the code stays reserved; typing the code again later brings back the same option with the values then entered — within one edit it is simply kept); status never goes back to DRAFT; an on-sale product needs an option on sale; limits 100 options / 20 images / 5000-character description; prices ≥ 0 with ≤ 2 decimals, whole VND | `domain/productForm.ts` (`nextProductStatuses`, `productFormProblems`) — hints only, the backend decides | BR-CAT-08..11, BR-MER-01 |
+| Update-product is a **full replace**: fields the form does not edit (thumbnail, category, SKU currency and dimensions) are sent back as loaded, and untouched fields keep their stored value exactly, so an untouched form changes nothing | `domain/productForm.ts` `toUpdateInput` (round-trip tested) | stores-service#48 |
 
 The front end never decides real availability, prices or totals: order-service will (BR-CRT-04, BR-ORD-14, BR-PRC-03).
 
@@ -136,7 +138,7 @@ inventory read (open question 6). Consequences:
 - Path-based routes. Storefront: `/`, `/search?q=`, `/shop/:merchantId/:storeId`,
   `/product/:merchantId/:storeId/:productId`, `/cart`, `/checkout`, `/orders`, `/login?next=`.
   Seller Centre: `/seller/merchants`, `/seller/m/:merchantId`, `/seller/m/:merchantId/stores/new`,
-  `/seller/m/:merchantId/s/:storeId[/products|/products/new|/products/:id|/collections|/collections/:id|/settings|/closures]`.
+  `/seller/m/:merchantId/s/:storeId[/products|/products/new|/products/:id|/products/:id/edit|/collections|/collections/:id|/settings|/closures]`.
 - `/seller` and `/seller/**` (exact segment match) → Seller Centre; everything else → storefront.
 - **Reserved prefixes** never used by app routes: `/v1/`, `/internal/`, `/assets/`.
 - Dev proxy (`vite.config.ts`): `/v1/store/` → :8048, `/v1/inventory/` → :8058 (trailing slashes on purpose).
@@ -162,6 +164,11 @@ import form is shown only in demo mode (the API takes any bucket, open question 
 Every page renders four states: **loading** (skeleton or spinner), **empty** (with a next step), **error**
 (`ErrorBox`), **partial** (catalog fan-out). Stock "unknown" shows nothing and does not block.
 
+Product edit (`features/seller/products/ProductEditPage.tsx`): the form sends the `version` it loaded. A 409 is either a stale
+version or a SKU code used by another product of the store; the page re-reads the product and compares versions
+(`classifyConflict`) instead of parsing the message — stale → "Reload latest" (the form is keyed by version, so it resets),
+same version → a SKU code clash: the edits are kept and the user is asked to check the new codes; if the re-read fails, only the server message is shown. Edit is hidden when the backend sends no `version`.
+
 Errors: one `AppError` (status, message, details). 4xx messages from oms-core `ErrorResponse` are user-facing and
 shown as-is (incl. 409, 422); **5xx text is never shown** — the user sees a generic message plus a request id.
 
@@ -186,7 +193,7 @@ guarded reads/writes, cross-tab sync via the `storage` event, read-modify-write 
 
 | Level | What | Command |
 |-------|------|---------|
-| Domain | money, merchant code, cart (group, merge, clamp, checks), split per store, open-now boundary, stock level, search, safe URLs | `npm test` |
+| Domain | money, merchant code, cart (group, merge, clamp, checks), split per store, open-now boundary, stock level, search, safe URLs, product form (status moves, limits, prices, no-data-loss round trip, 409 classification) | `npm test` |
 | Adapters | DTO → domain mapping on fixtures shaped like the Java DTOs; HTTP client (4xx text, 5xx masking, request id, network errors); catalog aggregation (caps, concurrency, status filter, partial failure, dedupe, stock exposure, cart checks) | `npm test` |
 | Architecture | dependency rule holds; the checker catches violations | `npm test`, `npm run lint:arch` |
 | Types | strict TypeScript | `npm run typecheck` |
@@ -197,7 +204,10 @@ Runner: `tsx --test` (Node's test runner); no framework dependency.
 **Not verified automatically**: the real backends, the Vite proxy and the production SPA fallback. Smoke check
 against the dev stack: register merchant → create store → create product → stock appears (Refresh) → receive stock
 → storefront home shows shop + product → sign in → add to cart → write off stock in the Seller Centre → cart flags
-the line → fix → checkout creates one order per shop.
+the line → fix → checkout creates one order per shop. Product edit: change a price and save (version +1) → remove an option
+(gone from the page; its stock row becomes "Not orderable" in inventory) → add the same code back (same option id) →
+save in two tabs (second gets 409 → Reload latest) → add a code used by another product (409, edits kept) → set every
+option "Not on sale" while the product is on sale (422).
 
 ## 9. Evolution
 
@@ -227,3 +237,4 @@ needed — then adopt react-router and TanStack Query; only `shared/lib` and its
 | 2026-10-27 | Max 99 per cart line (BR-CRT-02 → 🟢) | owner |
 | 2026-10-27 | Storefront shop list = featured-shops file + demo mode (same-browser Seller Centre stores) | owner |
 | 2026-10-27 | Collection page: members listed A→Z with Remove; the "Add products" picker lists only products not in the collection (`notInCollectionId`), all statuses with a badge | owner |
+| 2026-10-29 | Product edit page (full replace with version, stores-service#48); create form gets the same limits; prices step 1 đồng (VND) / 0.01 (other currencies); weight step 0.01. Prices stay JS numbers (exact up to 2^53, far above real VND prices) | owner (plan approved) |

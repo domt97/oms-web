@@ -6,6 +6,7 @@ import type { Category, Collection, Page, Product, ProductSummary } from '../dom
 import type { Customer } from '../domain/customer';
 import type { Inventory, StockBySku, StockMovement, StockMovementType } from '../domain/inventory';
 import type { Merchant } from '../domain/merchant';
+import type { ProductUpdate } from '../domain/productForm';
 import type { CheckoutRequest, Order } from '../domain/order';
 import type { Address, AvailabilityType, BusinessHour, ShopRef, Store, StoreAvailability, StoreConfig } from '../domain/store';
 
@@ -103,6 +104,9 @@ export interface CreateProductInput {
   images: Array<{ imageUrl: string; displayOrder: number }>;
 }
 
+/** See domain/productForm.ts `toUpdateInput`: a full replace, every field must be sent. */
+export type UpdateProductInput = ProductUpdate;
+
 export interface ImportResult {
   ok: boolean;
   totalRecords?: number | null;
@@ -128,6 +132,8 @@ export interface StorePort {
 export interface ProductPort {
   create(merchantId: string, storeId: string, input: CreateProductInput): Promise<Product>;
   get(merchantId: string, storeId: string, productId: string): Promise<Product>;
+  /** Full replace (stores-service update-product); 409 = stale version or SKU code used in the store. */
+  update(merchantId: string, storeId: string, productId: string, input: UpdateProductInput): Promise<Product>;
   /** Newest first. `notInCollectionId` leaves out the products already in that collection of the store. */
   list(merchantId: string, storeId: string, page: number, size: number, options?: { notInCollectionId?: string }): Promise<Page<ProductSummary>>;
   importFromS3(merchantId: string, storeId: string, bucket: string, key: string): Promise<ImportResult>;

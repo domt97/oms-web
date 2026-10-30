@@ -76,6 +76,9 @@ export interface ProductSkuDto {
   price: number;
   currency: string;
   weight?: number | null;
+  length?: number | null;
+  width?: number | null;
+  height?: number | null;
   status: 'ACTIVE' | 'INACTIVE';
 }
 
@@ -92,9 +95,12 @@ export interface StoreProductResponse {
   name: string;
   description?: string | null;
   thumbnailUrl?: string | null;
+  categoryId?: string | null;
   status: 'DRAFT' | 'ACTIVE' | 'INACTIVE';
   skus?: ProductSkuDto[] | null;
   images?: ProductImageDto[] | null;
+  /** stores-service ≥ update-product (PR #48); absent on older backends. */
+  version?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -135,4 +141,27 @@ export interface ImportResultDto {
   status: 'SUCCESS' | 'FAILED';
   totalRecords?: number | null;
   errorMessage?: string | null;
+}
+
+/** stores-service UpdateStoreProductRequest (PUT …/products/{productId}): a full replace. */
+export interface UpdateStoreProductRequest {
+  version: number;
+  name: string;
+  description: string | null;
+  thumbnailUrl: string | null;
+  categoryId: string | null;
+  status: 'DRAFT' | 'ACTIVE' | 'INACTIVE';
+  skus: Array<{
+    id?: string;
+    sku: string;
+    name: string | null;
+    price: number;
+    currency: string;
+    weight: number | null;
+    length: number | null;
+    width: number | null;
+    height: number | null;
+    status: 'ACTIVE' | 'INACTIVE';
+  }>;
+  images: Array<{ imageUrl: string; displayOrder: number }>;
 }

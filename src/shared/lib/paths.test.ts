@@ -10,6 +10,12 @@ describe('router paths', () => {
     assert.equal(matchPath('/shop/:m/:s', '/shop/%E0/x'), null);
     assert.equal(matchPath('/shop/:m/:s', '/shop/a'), null);
   });
+  it('product detail and edit routes never match each other (segment count must be equal)', () => {
+    const S = '/seller/m/:merchantId/s/:storeId';
+    assert.equal(matchPath(`${S}/products/:productId`, '/seller/m/a/s/b/products/p/edit'), null);
+    assert.deepEqual(matchPath(`${S}/products/:productId/edit`, '/seller/m/a/s/b/products/p/edit'), { merchantId: 'a', storeId: 'b', productId: 'p' });
+  });
+
   it('treats /seller as a segment, not a prefix', () => {
     assert.ok(isUnder('/seller', '/seller'));
     assert.ok(isUnder('/seller/m/1', '/seller'));
