@@ -8,7 +8,7 @@ import type { InventoryPort, ProductPort, ShopDirectoryPort, StorePort } from '.
 import { createAggregatingCatalog, mapLimited } from './catalog/aggregatingCatalog';
 import { createHttpClient } from './http/client';
 import { toPage, toProduct, toStore, toSummary } from './http/stores/mappers';
-import { createCollectionAdapter, createProductAdapter } from './http/stores/storesService';
+import { createCollectionAdapter, createProductAdapter, IMPORT_BUSY_MESSAGE } from './http/stores/storesService';
 
 // ---------- fixtures shaped like the Java DTOs ----------
 
@@ -81,6 +81,51 @@ describe('http client', () => {
   it('turns a network failure into status 0', async () => {
     const http = createHttpClient({ fetchImpl: async () => Promise.reject(new TypeError('fetch failed')) });
     await assert.rejects(http.get('/x'), (e: AppError) => e.status === 0 && e.isUnavailable);
+  });
+});
+
+describe('product import adapter', () => {
+  const importOnce = (fetchImpl: typeof fetch, timeoutMs = 15_000) =>
+    createProductAdapter(createHttpClient({ fetchImpl, timeoutMs })).importFromS3('m1', 's1', 'bucket', 'file.xlsx');
+  const slowOk = (ms: number) => (async (_u: RequestInfo | URL, init?: RequestInit) =>
+    new Promise<Response>((resolve, reject) => {
+      const t = setTimeout(() => resolve(new Response(JSON.stringify({ status: 'SUCCESS', totalRecords: 3 }), { status: 200 })), ms);
+      init?.signal?.addEventListener('abort', () => {
+        clearTimeout(t);
+        reject(new DOMException('aborted', 'AbortError'));
+      });
+    })) as typeof fetch;
+
+  it('uses the long import timeout instead of the client default', async () => {
+    // client default 20 ms; the import still succeeds after 60 ms
+    const r = await importOnce(slowOk(60), 20);
+    assert.deepEqual(r, { ok: true, totalRecords: 3, errorMessage: undefined });
+    // an ordinary call with the same client times out
+    const http = createHttpClient({ fetchImpl: slowOk(60), timeoutMs: 20 });
+    await assert.rejects(http.post('/x', {}), (e: AppError) => e.status === 0);
+  });
+
+  it('maps 200 FAILED to ok: false with the server message', async () => {
+    const r = await importOnce(async () => new Response(JSON.stringify({ status: 'FAILED', errorMessage: 'SKU code(s) already used' }), { status: 200 }));
+    assert.deepEqual(r, { ok: false, totalRecords: undefined, errorMessage: 'SKU code(s) already used' });
+  });
+
+  it('shows 409 (store already importing) and 400 messages as sent', async () => {
+    await assert.rejects(
+      importOnce(async () => new Response(JSON.stringify({ status: 409, error: 'An import for this store is already running; wait for it to finish' }), { status: 409 })),
+      (e: AppError) => e.status === 409 && e.message.startsWith('An import for this store'),
+    );
+    await assert.rejects(
+      importOnce(async () => new Response(JSON.stringify({ status: 400, error: 'The import file is larger than 5 MB' }), { status: 400 })),
+      (e: AppError) => e.status === 400 && e.message === 'The import file is larger than 5 MB',
+    );
+  });
+
+  it('turns 503 into a "server busy" message (5xx text is otherwise hidden)', async () => {
+    await assert.rejects(
+      importOnce(async () => new Response(JSON.stringify({ status: 503, error: 'The server is busy with other imports' }), { status: 503 })),
+      (e: AppError) => e.status === 503 && e.message === IMPORT_BUSY_MESSAGE,
+    );
   });
 });
 
