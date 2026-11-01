@@ -113,7 +113,7 @@ Stock is one call per product. So the adapter:
 - never calls inventory-service on list pages; stock is read on the product page and in the cart only;
 - maps only `availableQuantity` from inventory (on-hand and reserved counts never reach the UI — but the HTTP response still carries them, visible in DevTools; this ends with the public read model, open question 34);
 - caches store details for 60 s;
-- every HTTP call has a timeout (15 s, body included); the featured-shops file has its own 8 s timeout and a failed load is retried, not cached;
+- every HTTP call has a timeout (15 s, body included; a call may override it, e.g. product import uses 60 s because stores-service runs it in the request and may wait for a free import slot); the featured-shops file has its own 8 s timeout and a failed load is retried, not cached;
 - `checkCart` reports `failedCalls`; the cart tells the shopper when some facts could not be re-checked (unknown is not blocking).
 
 ### 4.2 Shop directory (decision 2026-10-27)

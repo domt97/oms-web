@@ -1,5 +1,6 @@
 import type { BusinessHour } from '../../../domain/store';
 import type { CollectionPort, MerchantPort, ProductPort, StorePort, UpdateProductInput } from '../../../ports';
+import { AppError } from '../../../domain/errors';
 import type { HttpClient } from '../client';
 import type {
   ImportResultDto,
@@ -13,6 +14,10 @@ import type {
   UpdateStoreProductRequest,
 } from './dto';
 import { toAvailability, toCollection, toMerchant, toPage, toProduct, toStore, toSummary } from './mappers';
+
+/** Import runs in the request (stores-service BR-CAT-13): up to ~15 s at the file limits, plus up to 40 s waiting for a slot. */
+export const IMPORT_TIMEOUT_MS = 60_000;
+export const IMPORT_BUSY_MESSAGE = 'The server is busy with other imports. Try again in a minute.';
 
 // stores-service, port 8048 (proxied at /v1/store). Every store path is merchant-scoped.
 const BASE = '/v1/store';
@@ -68,9 +73,19 @@ export function createProductAdapter(http: HttpClient): ProductPort {
         toSummary,
       ),
     importFromS3: async (merchantId, storeId, bucket, key) => {
-      // 200 even when the import failed (open question 24): map the status field.
-      const r = await http.post<ImportResultDto>(`${s(merchantId, storeId)}/products/import`, { path: bucket, fileName: key });
-      return { ok: r.status === 'SUCCESS', totalRecords: r.totalRecords, errorMessage: r.errorMessage };
+      // stores-service answers 200 SUCCESS, or 200 FAILED (nothing written; the rule broken, or a generic message for an
+      // internal error); 4xx for the file or a store already importing (409) — those messages are shown as sent.
+      // A large import can take ~15 s, more when the server waits for a free slot (up to 40 s): longer timeout.
+      try {
+        const r = await http.post<ImportResultDto>(`${s(merchantId, storeId)}/products/import`, { path: bucket, fileName: key }, undefined, {
+          timeoutMs: IMPORT_TIMEOUT_MS,
+        });
+        return { ok: r.status === 'SUCCESS', totalRecords: r.totalRecords, errorMessage: r.errorMessage };
+      } catch (e) {
+        // 503 = the server stayed busy with other imports (the client hides 5xx text, so say it here).
+        if (e instanceof AppError && e.status === 503) throw new AppError(503, IMPORT_BUSY_MESSAGE);
+        throw e;
+      }
     },
   };
 }

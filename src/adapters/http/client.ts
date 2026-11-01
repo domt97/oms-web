@@ -29,9 +29,15 @@ const STATUS_TEXT: Record<number, string> = {
   504: 'Backend did not respond',
 };
 
+/** Per-call settings; most calls use the client defaults. */
+export interface RequestOptions {
+  /** Overrides the client timeout for a call known to run long (e.g. product import). */
+  timeoutMs?: number;
+}
+
 export interface HttpClient {
   get<T>(path: string, query?: Query): Promise<T>;
-  post<T>(path: string, body?: unknown, query?: Query): Promise<T>;
+  post<T>(path: string, body?: unknown, query?: Query, options?: RequestOptions): Promise<T>;
   put<T>(path: string, body?: unknown): Promise<T>;
 }
 
@@ -52,10 +58,10 @@ export function createHttpClient(options: { baseUrl?: string; timeoutMs?: number
   const timeoutMs = options.timeoutMs ?? 15_000;
   const doFetch = options.fetchImpl ?? ((input: RequestInfo | URL, init?: RequestInit) => fetch(input, init));
 
-  async function request<T>(method: string, path: string, body?: unknown, query?: Query): Promise<T> {
+  async function request<T>(method: string, path: string, body?: unknown, query?: Query, options?: RequestOptions): Promise<T> {
     const id = requestId();
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const timer = setTimeout(() => controller.abort(), options?.timeoutMs ?? timeoutMs);
     let response: Response;
     try {
       response = await doFetch(baseUrl + path + toQueryString(query), {
@@ -104,7 +110,7 @@ export function createHttpClient(options: { baseUrl?: string; timeoutMs?: number
 
   return {
     get: (path, query) => request('GET', path, undefined, query),
-    post: (path, body, query) => request('POST', path, body, query),
+    post: (path, body, query, options) => request('POST', path, body, query, options),
     put: (path, body) => request('PUT', path, body),
   };
 }
