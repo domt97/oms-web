@@ -1,0 +1,40 @@
+name: CI
+
+# Typecheck, layer rule, unit tests and production build on every PR and push to develop/master.
+
+on:
+  pull_request:
+    branches: [develop, master]
+  push:
+    branches: [develop, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    name: Check and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # No package-lock.json is committed yet, so versions may drift between runs and there is no npm cache.
+      # Commit the lock file to switch this to `npm ci` with `cache: npm`.
+      - name: Install
+        run: npm install --no-audit --no-fund
+
+      - name: Check (typecheck, layer rule, tests) and build
+        run: npm run build
