@@ -1,6 +1,7 @@
 import type { Inventory, StockMovement, StockMovementType } from '../../../domain/inventory';
 import type { InventoryPort } from '../../../ports';
 import type { HttpClient } from '../client';
+import { toAppError } from '../../../domain/errors';
 
 // inventory-service, port 8058 (proxied at /v1/inventory).
 // Reads take no merchant (open question 6); merchant/store are checked only when adjusting.
@@ -22,7 +23,8 @@ interface InventoryDetailResponse {
 interface StockMovementResponse {
   id: number;
   inventoryId: string;
-  type: StockMovementType;
+  /** Raw from the backend: a type this build does not know yet is shown as its code. */
+  type: StockMovementType | (string & {});
   quantity: number;
   referenceType?: string | null;
   reason?: string | null;
@@ -34,7 +36,16 @@ const toMovement = (d: StockMovementResponse): StockMovement => ({ ...d });
 
 export function createInventoryAdapter(http: HttpClient): InventoryPort {
   return {
-    byProduct: async (productId) => (await http.get<InventoryDetailResponse[]>(`${BASE}/products/${encodeURIComponent(productId)}`)).map(toInventory),
+    // inventory-service answers 404 when the product has no inventory record at all (LoadInventoryService): that is a
+    // fact (nothing orderable, BR-CAT-04), not a failure. Other errors stay errors (stock unknown, not blocking).
+    byProduct: async (productId) => {
+      try {
+        return (await http.get<InventoryDetailResponse[]>(`${BASE}/products/${encodeURIComponent(productId)}`)).map(toInventory);
+      } catch (e) {
+        if (toAppError(e).isNotFound) return [];
+        throw e;
+      }
+    },
     adjust: async (inventoryId, input) =>
       toInventory(
         await http.post<InventoryDetailResponse>(`${BASE}/${encodeURIComponent(inventoryId)}`, {

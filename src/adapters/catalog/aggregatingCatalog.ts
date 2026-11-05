@@ -1,7 +1,7 @@
 import type { CartLine, LineCheck } from '../../domain/cart';
 import { isOnSale, matchesQuery, sellableSkus, type Page, type Product, type ProductSummary } from '../../domain/catalog';
 import { toAppError } from '../../domain/errors';
-import { stockBySku, type Inventory } from '../../domain/inventory';
+import { availableFor, stockBySku, type Inventory } from '../../domain/inventory';
 import { takesOrders, type ShopRef, type Store } from '../../domain/store';
 import type { CatalogPort, CatalogResult, InventoryPort, ProductCard, ProductPort, Shop, ShopDirectoryPort, StorePort } from '../../ports';
 
@@ -157,7 +157,7 @@ export function createAggregatingCatalog(
         checks[line.skuId] = {
           onSale: productMissing ? false : productKnown ? isOnSale(product.value) && !!sku : true,
           storeTakesOrders: store.status === 'fulfilled' ? takesOrders(store.value) : true,
-          available: stock.status === 'fulfilled' ? stockBySku(stock.value)[line.sku] : undefined,
+          available: stock.status === 'fulfilled' ? availableFor(stockBySku(stock.value), line.sku) : undefined,
           price: sku?.price,
         };
       }

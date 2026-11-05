@@ -50,4 +50,12 @@ export const MOVEMENT_LABEL: Record<StockMovementType, string> = {
   DAMAGE: 'Damage',
   TRANSFER_IN: 'Transfer in',
   TRANSFER_OUT: 'Transfer out',
+  RESERVE: 'Reserved for order',
+  RESERVE_RELEASE: 'Hold released',
+  RESERVE_EXPIRE: 'Hold expired',
 };
+
+/** Label of any movement type; a type this build does not know is shown as its raw code. */
+export function movementLabel(type: string): string {
+  return Object.hasOwn(MOVEMENT_LABEL, type) ? MOVEMENT_LABEL[type as StockMovementType] : type;
+}

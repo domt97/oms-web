@@ -85,8 +85,8 @@ export function setLineQuantity(lines: CartLine[], skuId: string, quantity: numb
 
 /** Fresh facts about a cart line, fetched when the cart is viewed (BR-CRT-03). */
 export interface LineCheck {
-  /** undefined = unknown (no inventory record, or the check failed) */
-  available?: number;
+  /** null = not orderable (no inventory record, or INACTIVE; BR-CAT-04); undefined = unknown (the check failed) */
+  available?: number | null;
   /** false when the product/SKU is no longer ACTIVE or no longer exists */
   onSale: boolean;
   /** false when the store is not ACTIVE */
@@ -112,6 +112,7 @@ export function checkLine(line: CartLine, check: LineCheck | undefined): LineIss
   if (!check) return issues;
   if (!check.storeTakesOrders) issues.push({ kind: 'store_closed', message: 'Shop is not taking orders' });
   if (!check.onSale) issues.push({ kind: 'unavailable', message: 'No longer available' });
+  else if (check.available === null) issues.push({ kind: 'unavailable', message: 'Not available' });
   else if (check.available !== undefined && check.available < line.quantity)
     issues.push({
       kind: 'not_enough_stock',
