@@ -76,7 +76,7 @@ Only decided rules (✅ / 🟢) or rules the owner confirmed on 2026-10-27; disp
 | Checkout = one order per store, one `checkoutId` | `domain/order.ts` `splitIntoOrders` | BR-ORD-01 |
 | Only ACTIVE stores take orders and appear in feeds; non-ACTIVE shop pages say "not taking orders" | `domain/store.ts` `takesOrders` | BR-STO-02 order rule — **decided 2026-10-27** |
 | Only ACTIVE products are shown to shoppers | `domain/catalog.ts` `isOnSale` | BR-CAT-01 — **decided 2026-10-27** |
-| Shoppers see stock as a status: In stock / Only N left (N ≤ 5) / Sold out; no record = unknown, not blocking. Neither messages nor quantity caps reveal a count above 5 | `domain/inventory.ts` `stockLevel`, `domain/cart.ts` | BR-CAT-04 (🟢 2026-10-27); BR-CAT-03, BR-INV-06 |
+| Shoppers see stock as a status: In stock / Only N left (N ≤ 5) / Sold out / Not available. A SKU with no inventory record, or an INACTIVE one, is **Not available** and blocks the cart line; stock that could not be read is unknown and does not block. Neither messages nor quantity caps reveal a count above 5 | `domain/inventory.ts` `stockBySku`, `availableFor`, `stockLevel`, `domain/cart.ts` | BR-CAT-04 (🟢 2026-10-27, no record = not orderable 2026-11-05); BR-CAT-03, BR-INV-08 |
 | Cart re-checks price/stock/availability when viewed; problems are **flagged, never removed**; blocking flags stop checkout | `domain/cart.ts` `checkLine` | BR-CRT-03 — flagging **decided 2026-10-27** |
 | "Open now" = inside today's hours in the store time zone, opening and closing minute inclusive (as `BusinessHour.isOpen`) | `domain/store.ts` `isOpenNow` | BR-STO-04 ✅ hours part; closures (🟡) are ignored — hint only |
 | Merchant-entered image URLs: only http(s) | `domain/catalog.ts` `safeImageUrl` (display); `domain/productForm.ts` `isAbsoluteHttpUrl` (forms) | security |
@@ -111,6 +111,7 @@ Stock is one call per product. So the adapter:
 - never fails a page because one shop fails: results carry `shopsSearched` / `shopsFailed` and the UI shows a
   "results may be incomplete" notice;
 - never calls inventory-service on list pages; stock is read on the product page and in the cart only;
+- reads a **404** of `GET /v1/inventory/inventories/products/{productId}` as "no inventory record" (inventory-service answers 404 when a product has none; BR-CAT-04 → Not available). Any other 404 (wrong proxy route, renamed path) would therefore show every product as Not available without an error: if that endpoint changes, change the adapter (`adapters/http/inventory/inventoryService.ts`) with it;
 - maps only `availableQuantity` from inventory (on-hand and reserved counts never reach the UI — but the HTTP response still carries them, visible in DevTools; this ends with the public read model, open question 34);
 - caches store details for 60 s;
 - every HTTP call has a timeout (15 s, body included; a call may override it, e.g. product import uses 60 s because stores-service runs it in the request and may wait for a free import slot); the featured-shops file has its own 8 s timeout and a failed load is retried, not cached;
@@ -199,8 +200,8 @@ guarded reads/writes, cross-tab sync via the `storage` event, read-modify-write 
 
 | Level | What | Command |
 |-------|------|---------|
-| Domain | money, merchant code, cart (group, merge, clamp, checks), split per store, open-now boundary, stock level, search, safe URLs, product form (status moves, limits, prices, no-data-loss round trip, 409 classification) | `npm test` |
-| Adapters | DTO → domain mapping on fixtures shaped like the Java DTOs; HTTP client (4xx text, 5xx masking, request id, network errors); catalog aggregation (caps, concurrency, status filter, partial failure, dedupe, stock exposure, cart checks) | `npm test` |
+| Domain | money, merchant code, cart (group, merge, clamp, checks), split per store, open-now boundary, stock level (incl. Not available, unknown vs no record), movement effect, search, safe URLs, product form (status moves, limits, prices, no-data-loss round trip, 409 classification) | `npm test` |
+| Adapters | DTO → domain mapping on fixtures shaped like the Java DTOs; HTTP client (4xx text, 5xx masking, request id, network errors); catalog aggregation (caps, concurrency, status filter, partial failure, dedupe, stock exposure, cart checks); inventory 404 = no record, other errors = unknown | `npm test` |
 | Architecture | dependency rule holds; the checker catches violations | `npm test`, `npm run lint:arch` |
 | Types | strict TypeScript | `npm run typecheck` |
 | End to end | manual smoke list below (automated E2E later, e.g. Playwright against the dev stack) | — |
@@ -213,7 +214,9 @@ against the dev stack: register merchant → create store → create product →
 the line → fix → checkout creates one order per shop. Product edit: change a price and save (version +1) → remove an option
 (gone from the page; its stock row becomes "Not orderable" in inventory) → add the same code back (same option id) →
 save in two tabs (second gets 409 → Reload latest) → add a code used by another product (409, edits kept) → set every
-option "Not on sale" while the product is on sale (422).
+option "Not on sale" while the product is on sale (422). Stock not orderable (BR-CAT-04): a product whose stock rows do not exist yet
+(e.g. Debezium stopped) → storefront shows "Not available", buttons disabled; a cart line for it is blocked at checkout;
+with inventory-service stopped instead → stock unknown, buying not blocked.
 
 ## 9. Evolution
 
@@ -244,3 +247,4 @@ needed — then adopt react-router and TanStack Query; only `shared/lib` and its
 | 2026-10-27 | Storefront shop list = featured-shops file + demo mode (same-browser Seller Centre stores) | owner |
 | 2026-10-27 | Collection page: members listed A→Z with Remove; the "Add products" picker lists only products not in the collection (`notInCollectionId`), all statuses with a badge | owner |
 | 2026-10-29 | Product edit page (full replace with version, stores-service#48); create form gets the same limits; prices step 1 đồng (VND) / 0.01 (other currencies); weight step 0.01. Prices stay JS numbers (exact up to 2^53, far above real VND prices) | owner (plan approved) |
+| 2026-11-05 | A SKU without an inventory record (or INACTIVE) is shown as Not available and cannot be ordered (BR-CAT-04 revised); the Seller Centre lists order holds (`RESERVE`, `RESERVE_RELEASE`, `RESERVE_EXPIRE`) without a +/− sign (BR-INV-05) | owner |

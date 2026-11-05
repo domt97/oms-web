@@ -6,7 +6,8 @@ import type { Inventory } from '../domain/inventory';
 import type { Store } from '../domain/store';
 import type { InventoryPort, ProductPort, ShopDirectoryPort, StorePort } from '../ports';
 import { createAggregatingCatalog, mapLimited } from './catalog/aggregatingCatalog';
-import { createHttpClient } from './http/client';
+import { createHttpClient, type HttpClient } from './http/client';
+import { createInventoryAdapter } from './http/inventory/inventoryService';
 import { toPage, toProduct, toStore, toSummary } from './http/stores/mappers';
 import { createCollectionAdapter, createProductAdapter, IMPORT_BUSY_MESSAGE } from './http/stores/storesService';
 
@@ -159,6 +160,21 @@ describe('stores-service collection and product adapters', () => {
   });
 });
 
+describe('inventory adapter', () => {
+  const http = (fail: number) =>
+    ({
+      get: async () => {
+        throw new AppError(fail, 'x');
+      },
+    }) as unknown as HttpClient;
+  it('reads a 404 for a product as "no inventory record" (BR-CAT-04)', async () => {
+    assert.deepEqual(await createInventoryAdapter(http(404)).byProduct('p'), []);
+  });
+  it('keeps other errors as errors', async () => {
+    await assert.rejects(createInventoryAdapter(http(503)).byProduct('p'), (e: AppError) => e.status === 503);
+  });
+});
+
 // ---------- aggregation ----------
 
 function store(id: string, status: Store['status'] = 'ACTIVE'): Store {
@@ -169,7 +185,7 @@ function summary(id: string, storeId: string, createdAt: string, status: Product
   return { id, storeId, name: `Product ${id}`, status, skuCount: 1, minPrice: 1000, maxPrice: 1000, currency: 'VND', createdAt };
 }
 
-function fakes(opts: { shops: string[]; failingStore?: string; failingList?: string; closed?: string[] }) {
+function fakes(opts: { shops: string[]; failingStore?: string; failingList?: string; closed?: string[]; inventory?: () => Promise<Inventory[]> }) {
   const calls = { list: 0, get: 0, inFlight: 0, maxInFlight: 0 };
   const directory: ShopDirectoryPort = { list: async () => opts.shops.map((id) => ({ merchantId: 'm1', storeId: id, name: id })) };
   const stores = {
@@ -194,7 +210,9 @@ function fakes(opts: { shops: string[]; failingStore?: string; failingList?: str
     },
   } as unknown as ProductPort;
   const inventory = {
-    byProduct: async (): Promise<Inventory[]> => [{ id: 'i', productId: 'p', sku: 'K', merchantId: 'm1', storeId: 's', quantity: 9, reservedQuantity: 7, availableQuantity: 2, status: 'ACTIVE', updatedAt: '' }],
+    byProduct:
+      opts.inventory ??
+      (async (): Promise<Inventory[]> => [{ id: 'i', productId: 'p', sku: 'K', merchantId: 'm1', storeId: 's', quantity: 9, reservedQuantity: 7, availableQuantity: 2, status: 'ACTIVE', updatedAt: '' }]),
   } as unknown as InventoryPort;
   return { calls, catalog: createAggregatingCatalog({ directory, stores, products, inventory }, { maxShops: 3, concurrency: 2 }) };
 }
@@ -235,6 +253,31 @@ describe('aggregating catalog (temporary storefront read model)', () => {
     assert.equal(checks.k.onSale, false);
     assert.equal(checks.k.available, 2);
     assert.equal(failedCalls, 0, 'a 404 is a fact, not a failure');
+  });
+  it('marks a cart SKU without an inventory record as not orderable (BR-CAT-04)', async () => {
+    const { catalog } = fakes({ shops: [] });
+    const { checks } = await catalog.checkCart([
+      { merchantId: 'm1', storeId: 'a', storeName: 'a', productId: 'p', productName: 'x', skuId: 'z', sku: 'NO-RECORD', price: 1, currency: 'VND', quantity: 1 },
+    ]);
+    assert.equal(checks.z.available, null);
+  });
+  it('marks every SKU of a product with no inventory record as not orderable (BR-CAT-04)', async () => {
+    const { catalog } = fakes({ shops: [], inventory: async () => [] });
+    assert.deepEqual(await catalog.stock('p'), {});
+    const { checks, failedCalls } = await catalog.checkCart([
+      { merchantId: 'm1', storeId: 'a', storeName: 'a', productId: 'p', productName: 'x', skuId: 'k', sku: 'K', price: 1, currency: 'VND', quantity: 1 },
+    ]);
+    assert.equal(checks.k.available, null);
+    assert.equal(failedCalls, 0);
+  });
+  it('keeps stock unknown (undefined, counted as a failed call) when inventory cannot be read', async () => {
+    const { catalog } = fakes({ shops: [], inventory: async () => { throw new AppError(503, 'down'); } });
+    await assert.rejects(catalog.stock('p'));
+    const { checks, failedCalls } = await catalog.checkCart([
+      { merchantId: 'm1', storeId: 'a', storeName: 'a', productId: 'p', productName: 'x', skuId: 'k', sku: 'K', price: 1, currency: 'VND', quantity: 1 },
+    ]);
+    assert.equal(checks.k.available, undefined);
+    assert.equal(failedCalls, 1);
   });
   it('counts failed calls in a cart check', async () => {
     const { catalog } = fakes({ shops: [], failingStore: 'a' });

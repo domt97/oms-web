@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { addLine, clampQuantity, groupByShop, MAX_LINE_QUANTITY, setLineQuantity, subtotal, type CartLine } from './cart';
 import { matchesQuery } from './catalog';
-import { isStockOut } from './inventory';
+import { availableFor, cannotBuy, isStockOut, movementEffect, stockBySku, type Inventory } from './inventory';
 import { isValidMerchantCode, normaliseMerchantCode } from './merchant';
 import { formatMoney, formatPriceRange } from './money';
 import { isValidPhone, splitIntoOrders } from './order';
@@ -116,6 +116,31 @@ describe('inventory', () => {
     assert.ok(isStockOut('DAMAGE'));
     assert.equal(isStockOut('RECEIVE'), false);
   });
+  it('treats order holds as neither stock in nor stock out (BR-INV-05)', () => {
+    assert.equal(isStockOut('RESERVE'), false);
+    assert.equal(movementEffect('RESERVE'), 'hold');
+    assert.equal(movementEffect('RESERVE_RELEASE'), 'hold_release');
+    assert.equal(movementEffect('RESERVE_EXPIRE'), 'hold_release');
+    assert.equal(movementEffect('SALE'), 'out');
+    assert.equal(movementEffect('RETURN'), 'in');
+    assert.equal(movementEffect('SOMETHING_NEW'), 'unknown');
+  });
+  const inv = (over: Partial<Inventory>): Inventory => ({
+    id: 'i', productId: 'p', sku: 'A', merchantId: 'm', storeId: 's', quantity: 5, reservedQuantity: 1, availableQuantity: 4, status: 'ACTIVE', updatedAt: '', ...over,
+  });
+  it('marks an INACTIVE inventory as not orderable (BR-INV-08)', () => {
+    assert.deepEqual(stockBySku([inv({}), inv({ sku: 'B', status: 'INACTIVE' })]), { A: 4, B: null });
+  });
+  it('tells a SKU without a record (not orderable) from stock that could not be read (unknown)', () => {
+    const stock = stockBySku([inv({})]);
+    assert.equal(availableFor(stock, 'A'), 4);
+    assert.equal(availableFor(stock, 'MISSING'), null);
+    assert.equal(availableFor(undefined, 'A'), undefined);
+  });
+  it('does not read inherited keys as stock (merchant SKU codes are free text)', () => {
+    assert.equal(availableFor(stockBySku([inv({})]), 'constructor'), null);
+    assert.equal(availableFor(stockBySku([inv({})]), 'toString'), null);
+  });
 });
 
 describe('stock level shown to shoppers (decision 2026-10-27)', async () => {
@@ -125,6 +150,13 @@ describe('stock level shown to shoppers (decision 2026-10-27)', async () => {
     assert.equal(stockLabel(stockLevel(3)), 'Only 3 left');
     assert.equal(stockLabel(stockLevel(0)), 'Sold out');
     assert.equal(stockLabel(stockLevel(undefined)), null);
+  });
+  it('shows a SKU that cannot be ordered as not available and blocks it (BR-CAT-04)', () => {
+    assert.equal(stockLabel(stockLevel(null)), 'Not available');
+    assert.ok(cannotBuy(stockLevel(null)));
+    assert.ok(cannotBuy(stockLevel(0)));
+    assert.equal(cannotBuy(stockLevel(undefined)), false);
+    assert.equal(cannotBuy(stockLevel(3)), false);
   });
 });
 
@@ -136,6 +168,12 @@ describe('cart line checks (BR-CRT-03: flag, do not remove)', async () => {
     assert.ok(isBlocking(issues[0]));
   });
   it('treats unknown stock as fine', () => assert.deepEqual(checkLine(line(), { onSale: true, storeTakesOrders: true }), []));
+  it('blocks a SKU that cannot be ordered (BR-CAT-04)', () => {
+    const [i] = checkLine(line(), { available: null, onSale: true, storeTakesOrders: true });
+    assert.equal(i.kind, 'unavailable');
+    assert.equal(i.message, 'Not available');
+    assert.ok(isBlocking(i));
+  });
   it('flags a closed store and an unavailable product', () => {
     const kinds = checkLine(line(), { onSale: false, storeTakesOrders: false }).map((i) => i.kind);
     assert.deepEqual(kinds, ['store_closed', 'unavailable']);

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { clampQuantity } from '../../../domain/cart';
 import { sellableSkus, sortedImages } from '../../../domain/catalog';
-import { stockLevel } from '../../../domain/inventory';
+import { availableFor, cannotBuy, stockLevel } from '../../../domain/inventory';
 import { formatMoney } from '../../../domain/money';
 import { isUuid } from '../../../domain/ids';
 import { isOpenNow, takesOrders } from '../../../domain/store';
@@ -45,10 +45,13 @@ export function ProductPage({ merchantId, storeId, productId }: Props) {
   if (product.error) return <ErrorBox error={product.error} title="Could not open this product" />;
   const p = product.data!;
   const skus = sellableSkus(p);
-  const available = (code: string) => stock.data?.[code];
-  const sku = skus.find((s) => s.id === skuId) ?? skus.find((s) => stockLevel(available(s.sku)).kind !== 'sold_out') ?? skus[0];
+  // null = not orderable (no inventory record or INACTIVE, BR-CAT-04); undefined = stock not loaded or failed.
+  const available = (code: string) => availableFor(stock.data, code);
+  const sku = skus.find((s) => s.id === skuId) ?? skus.find((s) => !cannotBuy(stockLevel(available(s.sku)))) ?? skus[0];
   const left = sku ? available(sku.sku) : undefined;
-  const soldOut = stockLevel(left).kind === 'sold_out';
+  const soldOut = cannotBuy(stockLevel(left));
+  /** A count for the quantity caps; none when unknown or not orderable. */
+  const leftCount = left ?? undefined;
   const images = sortedImages(p);
   const store = shop.data;
   // The shop must be loaded and taking orders (BR-STO-02); otherwise the buttons stay disabled with a reason.
@@ -76,7 +79,7 @@ export function ProductPage({ merchantId, storeId, productId }: Props) {
         thumbnailUrl: p.thumbnailUrl ?? images[0]?.imageUrl,
         quantity: qty,
       },
-      left,
+      leftCount,
     );
     if (thenGoToCart) navigate('/cart');
     else setToast('Added to your cart');
@@ -117,7 +120,7 @@ export function ProductPage({ merchantId, storeId, productId }: Props) {
                     type="button"
                     className="sf-option"
                     aria-pressed={s.id === sku?.id}
-                    disabled={stockLevel(available(s.sku)).kind === 'sold_out'}
+                    disabled={cannotBuy(stockLevel(available(s.sku)))}
                     onClick={() => {
                       setSkuId(s.id);
                       setQty(1);
@@ -138,7 +141,7 @@ export function ProductPage({ merchantId, storeId, productId }: Props) {
                   −
                 </button>
                 <span aria-live="polite">{qty}</span>
-                <button type="button" onClick={() => setQty((q) => clampQuantity(q + 1, left))} aria-label="Increase" disabled={qty >= clampQuantity(qty + 1, left)}>
+                <button type="button" onClick={() => setQty((q) => clampQuantity(q + 1, leftCount))} aria-label="Increase" disabled={qty >= clampQuantity(qty + 1, leftCount)}>
                   +
                 </button>
               </div>

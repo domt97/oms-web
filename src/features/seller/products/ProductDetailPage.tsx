@@ -1,9 +1,9 @@
 import { useState, type FormEvent } from 'react';
 import { sortedImages, type Sku } from '../../../domain/catalog';
-import { isStockOut, STOCK_IN_TYPES, STOCK_OUT_TYPES, type Inventory, type StockMovementType } from '../../../domain/inventory';
+import { isStockOut, movementEffect, STOCK_IN_TYPES, STOCK_OUT_TYPES, type Inventory, type MovementEffect, type StockMovementType } from '../../../domain/inventory';
 import { formatMoney } from '../../../domain/money';
 import { useAction, useAsync } from '../../../shared/lib/async';
-import { formatDateTime, MOVEMENT_LABEL, PRODUCT_STATUS_LABEL } from '../../../shared/lib/format';
+import { formatDateTime, MOVEMENT_LABEL, movementLabel, PRODUCT_STATUS_LABEL } from '../../../shared/lib/format';
 import { useServices } from '../../../shared/lib/services';
 import { Badge, Button, ButtonLink, Card, Empty, ErrorBox, Field, IdChip, Img, Input, Loading, PageHeader, Select, Toast } from '../../../shared/ui/ui';
 import { merchantBase, storeBase } from '../paths';
@@ -101,8 +101,8 @@ export function ProductDetailPage({ merchantId, storeId, productId }: Props) {
           </div>
           {stock.data && p.skus.some((sku) => !bySku.has(sku.sku)) && (
             <div className="card-body small muted">
-              Some options have no stock record yet. Stock is created asynchronously from the ProductCreated / ProductUpdated events (Debezium → Kafka); press Refresh after a
-              few seconds. If it stays empty, check the Debezium connector and inventory-service.
+              Some options have no stock record yet, so shoppers see them as Not available and cannot order them (BR-CAT-04). Stock is created asynchronously from the
+              ProductCreated / ProductUpdated events (Debezium → Kafka); press Refresh after a few seconds. If it stays empty, check the Debezium connector and inventory-service.
             </div>
           )}
         </Card>
@@ -148,12 +148,22 @@ function SkuRow({ sku, inventory, selected, onSelect }: { sku: Sku; inventory?: 
         </>
       ) : (
         <td colSpan={4} className="muted small">
-          no stock record yet
+          no stock record yet <Badge tone="warn">Not orderable</Badge>
         </td>
       )}
     </tr>
   );
 }
+
+// Holds change the reserved quantity, not the stock on hand: shown neutral, without a sign (BR-INV-05).
+const QTY_COLOR: Record<MovementEffect, string> = {
+  in: 'var(--ok)',
+  out: 'var(--danger)',
+  hold: 'var(--muted)',
+  hold_release: 'var(--muted)',
+  unknown: 'var(--muted)',
+};
+const QTY_SIGN: Record<MovementEffect, string> = { in: '+', out: '−', hold: '', hold_release: '', unknown: '' };
 
 function AdjustForm({ inventory, merchantId, storeId, onAdjusted }: { inventory: Inventory; merchantId: string; storeId: string; onAdjusted: (i: Inventory) => void }) {
   const { inventory: inventoryPort } = useServices();
@@ -250,9 +260,9 @@ function Movements({ inventoryId, version }: { inventoryId: string; version: str
               {rows.map((m) => (
                 <tr key={m.id}>
                   <td className="small">{formatDateTime(m.createdAt)}</td>
-                  <td>{MOVEMENT_LABEL[m.type]}</td>
-                  <td className="num" style={{ color: isStockOut(m.type) ? 'var(--danger)' : 'var(--ok)' }}>
-                    {isStockOut(m.type) ? '−' : '+'}
+                  <td>{movementLabel(m.type)}</td>
+                  <td className="num" style={{ color: QTY_COLOR[movementEffect(m.type)] }}>
+                    {QTY_SIGN[movementEffect(m.type)]}
                     {m.quantity}
                   </td>
                   <td className="small muted">{m.reason || '—'}</td>
@@ -262,7 +272,7 @@ function Movements({ inventoryId, version }: { inventoryId: string; version: str
           </table>
         </div>
       )}
-      <div className="card-body small muted">Only manual adjustments are recorded; reservations and order confirmations are not yet (open question 14).</div>
+      <div className="card-body small muted">Order holds and confirmations appear here once inventory-service records them (BR-INV-05); today only manual adjustments are recorded.</div>
     </Card>
   );
 }

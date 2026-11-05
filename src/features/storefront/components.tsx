@@ -79,11 +79,11 @@ export function PartialNotice({ result }: { result: Pick<CatalogResult<unknown>,
 }
 
 /** Stock as shoppers see it (decision 2026-10-27): a status, not a count. */
-export function StockText({ available }: { available: number | undefined }) {
+export function StockText({ available }: { available: number | null | undefined }) {
   const level = stockLevel(available);
   const label = stockLabel(level);
   if (!label) return null;
-  const color = level.kind === 'sold_out' ? 'var(--danger)' : level.kind === 'low' ? 'var(--warn)' : 'var(--ok)';
+  const color = level.kind === 'sold_out' || level.kind === 'not_available' ? 'var(--danger)' : level.kind === 'low' ? 'var(--warn)' : 'var(--ok)';
   return (
     <span className="small" style={{ color, fontWeight: 600 }}>
       {label}
