@@ -30,11 +30,11 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: '22'
+          cache: npm
 
-      # No package-lock.json is committed yet, so versions may drift between runs and there is no npm cache.
-      # Commit the lock file to switch this to `npm ci` with `cache: npm`.
+      # Installs exactly what package-lock.json records and fails when it does not match package.json.
       - name: Install
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
       - name: Check (typecheck, layer rule, tests) and build
         run: npm run build
