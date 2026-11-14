@@ -53,7 +53,9 @@ Branch **from `develop`** and open PRs **into `develop`** (`feature/...`, `fix/.
 
 ## Pitfalls
 
-- No `package-lock.json` is committed, so CI uses `npm install` and versions can drift between runs.
+- `package-lock.json` is committed and CI installs with `npm ci`. After changing a dependency, commit the lockfile too.
+  Regenerate it from scratch (`rm -rf node_modules package-lock.json && npm install`) if it only lists the binaries of
+  your own platform (`@rollup/rollup-*`, `@esbuild/*`): CI runs on Linux and the build fails without them.
 - The storefront reads merchant-scoped seller endpoints until a public catalog exists (`docs/architecture.md` §4.3).
   A backend change to their path, auth or page size breaks it.
 - `VITE_*` values are read at build time; `VITE_STOREFRONT_DEMO` defaults to true in dev and false in builds.
