@@ -17,7 +17,9 @@ npm run dev            # http://localhost:5173  (Seller Centre: http://localhost
 ```
 
 Start the backends first (`development` infra, then stores-service and inventory-service with the `localdev` profile).
-The dev server proxies `/v1/store/` → `:8048` and `/v1/inventory/` → `:8058`, so no CORS setup is needed. Other hosts:
+The dev server proxies `/v1/store/` → `:8048` and `/v1/inventory/` → `:8058`, so the API needs no CORS setup. The product
+import uploads the file straight to LocalStack (`http://localhost:4566`) with a presigned URL; the `development` Terraform
+allows that origin (`web_origins`). Other hosts:
 copy `.env.example` to `.env`.
 
 Try it: open `/seller`, register a merchant, create a store and a product, press **Refresh** until stock appears,

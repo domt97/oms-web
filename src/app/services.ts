@@ -2,7 +2,15 @@ import { createAggregatingCatalog } from '../adapters/catalog/aggregatingCatalog
 import { createShopDirectory } from '../adapters/catalog/shopDirectory';
 import { createHttpClient } from '../adapters/http/client';
 import { createInventoryAdapter } from '../adapters/http/inventory/inventoryService';
-import { createCollectionAdapter, createMerchantAdapter, createProductAdapter, createStoreAdapter } from '../adapters/http/stores/storesService';
+import { createProductImportAdapter } from '../adapters/http/productImport';
+import { createPresignedUploader } from '../adapters/http/s3/uploader';
+import {
+  createCollectionAdapter,
+  createImportUploadClient,
+  createMerchantAdapter,
+  createProductAdapter,
+  createStoreAdapter,
+} from '../adapters/http/stores/storesService';
 import { createLocalCart, createLocalOrders, createLocalSession, createLocalWorkspace } from '../adapters/local/localAdapters';
 import { createStaticCategories } from '../adapters/static/categories';
 import type { Services } from '../ports';
@@ -18,6 +26,7 @@ export function createServices(config: AppConfig): Services {
   const merchants = createMerchantAdapter(http);
   const stores = createStoreAdapter(http);
   const products = createProductAdapter(http);
+  const productImport = createProductImportAdapter(createImportUploadClient(http), createPresignedUploader());
   const collections = createCollectionAdapter(http);
   const inventory = createInventoryAdapter(http);
   const workspace = createLocalWorkspace();
@@ -41,6 +50,7 @@ export function createServices(config: AppConfig): Services {
     merchants,
     stores,
     products,
+    productImport,
     collections,
     inventory,
     workspace,

@@ -22,6 +22,7 @@ become two deployables later (§9).
 | Need | Backend today | Front end today |
 |------|---------------|-----------------|
 | Seller operations | stores-service `/v1/store/merchants/{merchantId}/…`, inventory-service `/v1/inventory/…` | HTTP adapters |
+| Product import file | stores-service signs a presigned PUT into the store's import folder (BR-CAT-17) | the browser PUTs the file **straight to file storage** (S3; LocalStack locally), the one call that leaves the API origin |
 | Public catalog across merchants — shop list, feed, search (**BR-USR-05**, 🟢 later phase) | **Missing**; only per-store listing under a merchant path, no keyword/status filter | `AggregatingCatalogAdapter` with hard limits (§4.1) |
 | Shop list for shoppers | **Missing** | `ShopDirectory`: featured-shops file + demo mode (§4.2) |
 | Categories | **Missing** (`categoryId` exists, no API) | Static list; clicking runs a text search |
@@ -35,7 +36,7 @@ become two deployables later (§9).
 src/
   domain/      pure TypeScript: models + rules. No React, no fetch, no storage.
   ports/       interfaces the UI needs (CatalogPort, CartPort, OrderPort, SessionPort, seller ports, Services)
-  adapters/    port implementations: http/ (stores-service, inventory-service + DTOs + mappers), catalog/, local/, static/
+  adapters/    port implementations: http/ (stores-service, inventory-service + DTOs + mappers, s3/ presigned upload), catalog/, local/, static/
   shared/      lib/ (router, async hooks, services context, formatting) and ui/ (kit, icons, styles). No business rules.
   features/
     storefront/  StorefrontApp (layout + routes) and pages: home, search, shop, product, cart, checkout, orders, account
@@ -96,6 +97,7 @@ The front end never decides real availability, prices or totals: order-service w
 | `OrderPort` | local mock, split per store | order-service (one request, idempotency key, all-or-nothing) |
 | `SessionPort` | local mock sign-in | identity / gateway |
 | `MerchantPort`, `StorePort`, `ProductPort`, `CollectionPort`, `InventoryPort` | HTTP | HTTP + credentials |
+| `ProductImportPort` | stores-service upload request → presigned PUT to file storage → import (`adapters/http/productImport.ts`) | same, with credentials on the stores-service calls |
 | `SellerWorkspacePort` | local (remembered merchants, stores, closures) | list APIs (stores of a merchant, closures) |
 
 ### 4.1 Aggregating catalog — limits (`adapters/catalog/aggregatingCatalog.ts`)
@@ -114,7 +116,7 @@ Stock is one call per product. So the adapter:
 - reads a **404** of `GET /v1/inventory/inventories/products/{productId}` as "no inventory record" (inventory-service answers 404 when a product has none; BR-CAT-04 → Not available). Any other 404 (wrong proxy route, renamed path) would therefore show every product as Not available without an error: if that endpoint changes, change the adapter (`adapters/http/inventory/inventoryService.ts`) with it;
 - maps only `availableQuantity` from inventory (on-hand and reserved counts never reach the UI — but the HTTP response still carries them, visible in DevTools; this ends with the public read model, open question 34);
 - caches store details for 60 s;
-- every HTTP call has a timeout (15 s, body included; a call may override it, e.g. product import uses 60 s because stores-service runs it in the request and may wait for a free import slot); the featured-shops file has its own 8 s timeout and a failed load is retried, not cached;
+- every HTTP call has a timeout (15 s, body included; a call may override it, e.g. product import uses 60 s because stores-service runs it in the request and may wait for a free import slot; the presigned file upload has 120 s); the featured-shops file has its own 8 s timeout and a failed load is retried, not cached;
 - `checkCart` reports `failedCalls`; the cart tells the shopper when some facts could not be re-checked (unknown is not blocking).
 
 ### 4.2 Shop directory (decision 2026-10-27)
@@ -159,8 +161,9 @@ inventory read (open question 6). Consequences:
 
 Seller-side safety: business hours are validated before saving (open days need both times, opening < closing — the
 backend does not validate and would fail later); closure times are entered in the browser's time zone and labelled so;
-a timed-out stock adjustment warns to check movements before retrying (the endpoint has no idempotency key); the S3
-import form is shown only in demo mode (the API takes any bucket, open question 25).
+a timed-out stock adjustment warns to check movements before retrying (the endpoint has no idempotency key); the Excel
+import checks the file (.xlsx, at most 5 MB, `domain/productImport.ts`) before anything is sent, uploads it with the
+presigned URL and imports only after the upload succeeded (BR-CAT-17); it is offered to every seller.
 
 Every page renders four states: **loading** (skeleton or spinner), **empty** (with a next step), **error**
 (`ErrorBox`), **partial** (catalog fan-out). Stock "unknown" shows nothing and does not block.
@@ -184,12 +187,15 @@ guarded reads/writes, cross-tab sync via the `storage` event, read-modify-write 
 
 ## 7. Cross-cutting
 
-- **Observability**: every HTTP call sends `X-Request-Id`; the services' request filter logs headers, so a browser
-  error can be traced. Client error reporting (e.g. to a collector) is a later step.
+- **Observability**: every call to our services sends `X-Request-Id`; the services' request filter logs headers, so a
+  browser error can be traced. The presigned PUT to file storage sends only its signed headers (`adapters/http/s3/uploader.ts`);
+  the upload URL is a bearer link and is never logged or put in an error message. Client error reporting (e.g. to a collector) is a later step.
 - **Security**: no secrets in the bundle. When identity arrives: prefer an httpOnly session cookie via the gateway
   (no tokens in `localStorage`) with CSRF protection; the Seller Centre route guard is UX only — the server
   authorizes. Merchant text is rendered as text (no `dangerouslySetInnerHTML`); images only from http(s) URLs with
-  `referrerPolicy="no-referrer"`. Add a Content-Security-Policy at the edge.
+  `referrerPolicy="no-referrer"`. Add a Content-Security-Policy at the edge; its `connect-src` must allow the file
+  storage origin of the presigned import upload (cross-origin, allowed by the bucket's CORS rule in the `development`
+  repo; https in a real environment).
 - **Accessibility**: landmarks, labelled controls, visible focus, no colour-only meaning, reduced-motion respected.
 - **Responsive**: 16 px gutters, no horizontal page scroll at 360–390 px (wide tables scroll inside their card).
 - **i18n**: English strings in components; extract to a message catalog when a second language is needed.
@@ -200,15 +206,17 @@ guarded reads/writes, cross-tab sync via the `storage` event, read-modify-write 
 
 | Level | What | Command |
 |-------|------|---------|
-| Domain | money, merchant code, cart (group, merge, clamp, checks), split per store, open-now boundary, stock level (incl. Not available, unknown vs no record), movement effect, search, safe URLs, product form (status moves, limits, prices, no-data-loss round trip, 409 classification) | `npm test` |
-| Adapters | DTO → domain mapping on fixtures shaped like the Java DTOs; HTTP client (4xx text, 5xx masking, request id, network errors); catalog aggregation (caps, concurrency, status filter, partial failure, dedupe, stock exposure, cart checks); inventory 404 = no record, other errors = unknown | `npm test` |
+| Domain | import file (.xlsx, 5 MB), money, merchant code, cart (group, merge, clamp, checks), split per store, open-now boundary, stock level (incl. Not available, unknown vs no record), movement effect, search, safe URLs, product form (status moves, limits, prices, no-data-loss round trip, 409 classification) | `npm test` |
+| Adapters | DTO → domain mapping on fixtures shaped like the Java DTOs; HTTP client (4xx text, 5xx masking, request id, network errors); import upload (exact size, file-name-only import body, presigned PUT with exactly the signed headers, error messages without the URL, never importing after a failed upload); catalog aggregation (caps, concurrency, status filter, partial failure, dedupe, stock exposure, cart checks); inventory 404 = no record, other errors = unknown | `npm test` |
 | Architecture | dependency rule holds; the checker catches violations | `npm test`, `npm run lint:arch` |
 | Types | strict TypeScript | `npm run typecheck` |
 | End to end | manual smoke list below (automated E2E later, e.g. Playwright against the dev stack) | — |
 
 Runner: `tsx --test` (Node's test runner); no framework dependency.
 
-**Not verified automatically**: the real backends, the Vite proxy and the production SPA fallback. Smoke check
+**Not verified automatically**: the real backends, the Vite proxy, the production SPA fallback, the import page wiring and
+the browser's CORS preflight to file storage. Import smoke: choose a .xlsx under 5 MB → Upload and import → products appear
+(a too-large or non-.xlsx file is refused before anything is sent). Smoke check
 against the dev stack: register merchant → create store → create product → stock appears (Refresh) → receive stock
 → storefront home shows shop + product → sign in → add to cart → write off stock in the Seller Centre → cart flags
 the line → fix → checkout creates one order per shop. Product edit: change a price and save (version +1) → remove an option

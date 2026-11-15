@@ -1,9 +1,11 @@
 import type { BusinessHour } from '../../../domain/store';
-import type { CollectionPort, MerchantPort, ProductPort, StorePort, UpdateProductInput } from '../../../ports';
+import type { CollectionPort, ImportResult, MerchantPort, ProductPort, StorePort, UpdateProductInput } from '../../../ports';
 import { AppError } from '../../../domain/errors';
 import type { HttpClient } from '../client';
 import type {
+  CreateImportUploadRequest,
   ImportResultDto,
+  ImportUploadResponse,
   MerchantDto,
   PagedResult,
   StoreAvailabilityResponse,
@@ -72,12 +74,27 @@ export function createProductAdapter(http: HttpClient): ProductPort {
         }),
         toSummary,
       ),
-    importFromS3: async (merchantId, storeId, bucket, key) => {
+  };
+}
+
+/** The two stores-service calls of the Excel import (BR-CAT-17); the upload itself goes straight to file storage. */
+export interface ImportUploadClient {
+  requestUpload(merchantId: string, storeId: string, sizeBytes: number): Promise<ImportUploadResponse>;
+  startImport(merchantId: string, storeId: string, fileName: string): Promise<ImportResult>;
+}
+
+export function createImportUploadClient(http: HttpClient): ImportUploadClient {
+  return {
+    // 400 = size outside 1 byte..5 MB, 404 = merchant or store: messages are shown as sent.
+    requestUpload: (merchantId, storeId, sizeBytes) =>
+      http.post<ImportUploadResponse>(`${s(merchantId, storeId)}/products/import-uploads`, { sizeBytes } satisfies CreateImportUploadRequest),
+    startImport: async (merchantId, storeId, fileName) => {
       // stores-service answers 200 SUCCESS, or 200 FAILED (nothing written; the rule broken, or a generic message for an
-      // internal error); 4xx for the file or a store already importing (409) — those messages are shown as sent.
-      // A large import can take ~15 s, more when the server waits for a free slot (up to 40 s): longer timeout.
+      // internal error); 4xx for the file (404 = not in the store's import folder) or a store already importing (409) —
+      // those messages are shown as sent. A large import can take ~15 s, more when the server waits for a free slot
+      // (up to 40 s): longer timeout. The body is the file name only: the server chooses the bucket and folder (BR-CAT-16).
       try {
-        const r = await http.post<ImportResultDto>(`${s(merchantId, storeId)}/products/import`, { path: bucket, fileName: key }, undefined, {
+        const r = await http.post<ImportResultDto>(`${s(merchantId, storeId)}/products/import`, { fileName }, undefined, {
           timeoutMs: IMPORT_TIMEOUT_MS,
         });
         return { ok: r.status === 'SUCCESS', totalRecords: r.totalRecords, errorMessage: r.errorMessage };
