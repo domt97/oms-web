@@ -137,6 +137,21 @@ export interface StoreCollectionResponse {
   status: 'ACTIVE' | 'INACTIVE';
 }
 
+/** stores-service CreateImportUploadRequest (POST …/products/import-uploads): the exact size of the file. */
+export interface CreateImportUploadRequest {
+  sizeBytes: number;
+}
+
+/** stores-service ImportUploadResponse: a presigned PUT into the store's import folder (BR-CAT-17). */
+export interface ImportUploadResponse {
+  fileName: string;
+  uploadUrl: string;
+  method: string;
+  headers: Record<string, string>;
+  expiresAt: string;
+  maxBytes: number;
+}
+
 export interface ImportResultDto {
   status: 'SUCCESS' | 'FAILED';
   totalRecords?: number | null;

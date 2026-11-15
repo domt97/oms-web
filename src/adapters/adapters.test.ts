@@ -9,7 +9,17 @@ import { createAggregatingCatalog, mapLimited } from './catalog/aggregatingCatal
 import { createHttpClient, type HttpClient } from './http/client';
 import { createInventoryAdapter } from './http/inventory/inventoryService';
 import { toPage, toProduct, toStore, toSummary } from './http/stores/mappers';
-import { createCollectionAdapter, createProductAdapter, IMPORT_BUSY_MESSAGE } from './http/stores/storesService';
+import { createProductImportAdapter } from './http/productImport';
+import {
+  createPresignedUploader,
+  UPLOAD_BAD_LINK_MESSAGE,
+  UPLOAD_REFUSED_MESSAGE,
+  UPLOAD_TIMEOUT_MESSAGE,
+  UPLOAD_UNREACHABLE_MESSAGE,
+  type PresignedUpload,
+  type PresignedUploader,
+} from './http/s3/uploader';
+import { createCollectionAdapter, createImportUploadClient, createProductAdapter, IMPORT_BUSY_MESSAGE, type ImportUploadClient } from './http/stores/storesService';
 
 // ---------- fixtures shaped like the Java DTOs ----------
 
@@ -87,7 +97,7 @@ describe('http client', () => {
 
 describe('product import adapter', () => {
   const importOnce = (fetchImpl: typeof fetch, timeoutMs = 15_000) =>
-    createProductAdapter(createHttpClient({ fetchImpl, timeoutMs })).importFromS3('m1', 's1', 'bucket', 'file.xlsx');
+    createImportUploadClient(createHttpClient({ fetchImpl, timeoutMs })).startImport('m1', 's1', 'file.xlsx');
   const slowOk = (ms: number) => (async (_u: RequestInfo | URL, init?: RequestInit) =>
     new Promise<Response>((resolve, reject) => {
       const t = setTimeout(() => resolve(new Response(JSON.stringify({ status: 'SUCCESS', totalRecords: 3 }), { status: 200 })), ms);
@@ -127,6 +137,149 @@ describe('product import adapter', () => {
       importOnce(async () => new Response(JSON.stringify({ status: 503, error: 'The server is busy with other imports' }), { status: 503 })),
       (e: AppError) => e.status === 503 && e.message === IMPORT_BUSY_MESSAGE,
     );
+  });
+});
+
+describe('import upload: stores-service calls', () => {
+  function recording(status: number, body: unknown) {
+    const calls: Array<{ url: string; method?: string; body?: unknown }> = [];
+    const client = createImportUploadClient(
+      createHttpClient({
+        fetchImpl: async (u, init) => {
+          calls.push({ url: String(u), method: init?.method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+          return new Response(JSON.stringify(body), { status });
+        },
+      }),
+    );
+    return { calls, client };
+  }
+  const uploadJson = {
+    fileName: 'f.xlsx',
+    uploadUrl: 'http://localhost:4566/b/m1/s1/imports/f.xlsx?X-Amz-Signature=abc',
+    method: 'PUT',
+    headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'x-amz-tagging': 'purpose=import-upload' },
+    expiresAt: '2026-11-15T10:15:00Z',
+    maxBytes: 5242880,
+  };
+
+  it('requests an upload with the exact size', async () => {
+    const { calls, client } = recording(200, uploadJson);
+    const r = await client.requestUpload('m1', 's1', 1234);
+    assert.deepEqual(calls, [{ url: '/v1/store/merchants/m1/stores/s1/products/import-uploads', method: 'POST', body: { sizeBytes: 1234 } }]);
+    assert.deepEqual(r, uploadJson);
+  });
+
+  it('shows the 400 and 404 messages of the upload request as sent', async () => {
+    await assert.rejects(recording(400, { status: 400, error: 'sizeBytes must be the file size, between 1 and 5242880 bytes' }).client.requestUpload('m1', 's1', 9),
+      (e: AppError) => e.status === 400 && e.message.startsWith('sizeBytes must be'));
+    await assert.rejects(recording(404, { status: 404, error: 'Store not found' }).client.requestUpload('m1', 's1', 9),
+      (e: AppError) => e.status === 404 && e.message === 'Store not found');
+  });
+
+  it('starts the import with the file name only (no bucket: the server chooses it, BR-CAT-16)', async () => {
+    const { calls, client } = recording(200, { status: 'SUCCESS', totalRecords: 2 });
+    await client.startImport('m1', 's1', 'f.xlsx');
+    assert.deepEqual(calls, [{ url: '/v1/store/merchants/m1/stores/s1/products/import', method: 'POST', body: { fileName: 'f.xlsx' } }]);
+  });
+});
+
+describe('presigned uploader (browser → file storage)', () => {
+  const upload: PresignedUpload = {
+    uploadUrl: 'http://localhost:4566/b/m1/s1/imports/f.xlsx?X-Amz-Signature=secret',
+    method: 'PUT',
+    headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'x-amz-tagging': 'purpose=import-upload' },
+  };
+  const file = new Blob(['xlsx bytes']);
+  const noUrl = (e: AppError) => !e.message.includes('X-Amz') && !e.message.includes('localhost') && e.details.every((d) => !d.includes('X-Amz'));
+
+  it('PUTs the file to the URL with exactly the signed headers (no Accept, no X-Request-Id)', async () => {
+    let seen: { url: string; init?: RequestInit } | undefined;
+    await createPresignedUploader({
+      fetchImpl: async (u, init) => {
+        seen = { url: String(u), init };
+        return new Response('', { status: 200 });
+      },
+    }).put(upload, file);
+    assert.equal(seen?.url, upload.uploadUrl);
+    assert.equal(seen?.init?.method, 'PUT');
+    assert.equal(seen?.init?.body, file);
+    assert.deepEqual(Object.fromEntries(new Headers(seen?.init?.headers).entries()), upload.headers);
+  });
+
+  it('maps 403, other statuses, network failures and timeouts to messages without the URL', async () => {
+    const status = (n: number) => createPresignedUploader({ fetchImpl: async () => new Response('<Error/>', { status: n }) });
+    await assert.rejects(status(403).put(upload, file), (e: AppError) => e.status === 403 && e.message === UPLOAD_REFUSED_MESSAGE && noUrl(e));
+    await assert.rejects(status(500).put(upload, file), (e: AppError) => e.status === 500 && e.message === 'File storage rejected the upload (HTTP 500).' && noUrl(e));
+    await assert.rejects(
+      createPresignedUploader({ fetchImpl: async () => Promise.reject(new TypeError('Failed to fetch')) }).put(upload, file),
+      (e: AppError) => e.status === 0 && e.message === UPLOAD_UNREACHABLE_MESSAGE && noUrl(e),
+    );
+    const hanging = (async (_u: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))))) as typeof fetch;
+    const started = Date.now();
+    await assert.rejects(createPresignedUploader({ fetchImpl: hanging, timeoutMs: 20 }).put(upload, file),
+      (e: AppError) => e.status === 0 && e.message === UPLOAD_TIMEOUT_MESSAGE);
+    assert.ok(Date.now() - started < 2_000);
+  });
+
+  it('refuses a URL that is not http(s) without calling fetch', async () => {
+    let called = false;
+    const uploader = createPresignedUploader({
+      fetchImpl: async () => {
+        called = true;
+        return new Response('', { status: 200 });
+      },
+    });
+    await assert.rejects(uploader.put({ ...upload, uploadUrl: 'javascript:alert(1)' }, file),
+      (e: AppError) => e.message === UPLOAD_BAD_LINK_MESSAGE && !e.message.includes('javascript'));
+    assert.equal(called, false);
+  });
+});
+
+describe('product import flow (BR-CAT-17)', () => {
+  const file = new File(['bytes'], 'products.xlsx');
+  const signed = { fileName: 'server-chosen.xlsx', uploadUrl: 'http://s3/u', method: 'PUT', headers: {}, expiresAt: 'x', maxBytes: 5242880 };
+
+  function fakes(opts: { requestFails?: boolean; putFails?: boolean } = {}) {
+    const steps: string[] = [];
+    const client: ImportUploadClient = {
+      requestUpload: async (m, s, size) => {
+        steps.push(`request ${m} ${s} ${size}`);
+        if (opts.requestFails) throw new AppError(404, 'Store not found');
+        return signed;
+      },
+      startImport: async (m, s, name) => {
+        steps.push(`import ${m} ${s} ${name}`);
+        return { ok: true, totalRecords: 4 };
+      },
+    };
+    let putBody: Blob | undefined;
+    const uploader: PresignedUploader = {
+      put: async (u, body) => {
+        steps.push(`put ${u.uploadUrl}`);
+        putBody = body;
+        if (opts.putFails) throw new AppError(403, UPLOAD_REFUSED_MESSAGE);
+      },
+    };
+    return { steps, port: createProductImportAdapter(client, uploader), putBody: () => putBody };
+  }
+
+  it('requests an upload of the file size, PUTs the same file, then imports the server-chosen name', async () => {
+    const f = fakes();
+    const r = await f.port.importFile('m1', 's1', file);
+    assert.deepEqual(f.steps, [`request m1 s1 ${file.size}`, 'put http://s3/u', 'import m1 s1 server-chosen.xlsx']);
+    assert.equal(f.putBody(), file);
+    assert.deepEqual(r, { ok: true, totalRecords: 4 });
+  });
+
+  it('never imports after a failed upload, and never uploads after a failed request', async () => {
+    const put = fakes({ putFails: true });
+    await assert.rejects(put.port.importFile('m1', 's1', file), (e: AppError) => e.status === 403);
+    assert.deepEqual(put.steps, [`request m1 s1 ${file.size}`, 'put http://s3/u']);
+
+    const req = fakes({ requestFails: true });
+    await assert.rejects(req.port.importFile('m1', 's1', file), (e: AppError) => e.status === 404);
+    assert.deepEqual(req.steps, [`request m1 s1 ${file.size}`]);
   });
 });
 

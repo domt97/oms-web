@@ -136,7 +136,15 @@ export interface ProductPort {
   update(merchantId: string, storeId: string, productId: string, input: UpdateProductInput): Promise<Product>;
   /** Newest first. `notInCollectionId` leaves out the products already in that collection of the store. */
   list(merchantId: string, storeId: string, page: number, size: number, options?: { notInCollectionId?: string }): Promise<Page<ProductSummary>>;
-  importFromS3(merchantId: string, storeId: string, bucket: string, key: string): Promise<ImportResult>;
+}
+
+/** Seller Centre Excel import (BR-CAT-16/17). */
+export interface ProductImportPort {
+  /**
+   * Uploads the file to the store's import folder, then imports it. Never imports when the upload failed. Rejects with
+   * an AppError whose message is written for the seller (4xx text from the services, upload failures).
+   */
+  importFile(merchantId: string, storeId: string, file: File): Promise<ImportResult>;
 }
 
 export interface CollectionPort {
@@ -197,6 +205,7 @@ export interface Services {
   merchants: MerchantPort;
   stores: StorePort;
   products: ProductPort;
+  productImport: ProductImportPort;
   collections: CollectionPort;
   inventory: InventoryPort;
   workspace: SellerWorkspacePort;
@@ -205,6 +214,6 @@ export interface Services {
 
 /** Runtime switches read from config (app/config.ts). */
 export interface FeatureFlags {
-  /** Demo deployment: storefront also lists same-browser Seller Centre stores; risky tools (S3 import) are shown. */
+  /** Demo deployment: the storefront also lists same-browser Seller Centre stores. */
   demo: boolean;
 }

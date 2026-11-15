@@ -8,13 +8,14 @@ Part of the OMS. System-wide map, rules and the other services: **`oms-workspace
 
 Shopper storefront at `/` and Seller Centre at `/seller` (React 19 + TypeScript, Vite, dev port **5173**). It owns no
 data: merchants, stores, products, collections and stock come from stores-service (`/v1/store/`) and inventory-service
-(`/v1/inventory/`) through a proxy. Shopper sign-in, cart, orders and the seller's lists of stores and closures are
+(`/v1/inventory/`) through a proxy; the one exception is the product import file, which the browser uploads straight to
+file storage (S3, LocalStack locally) with a presigned URL from stores-service (`adapters/http/s3/uploader.ts`). Shopper sign-in, cart, orders and the seller's lists of stores and closures are
 browser-local stand-ins behind ports until the backend has them (`docs/architecture.md` §4, §9).
 
 ## Layers (enforced by `npm run lint:arch`)
 
-`src/domain` (pure TypeScript rules) ← `ports` ← `adapters` (`http/stores`, `http/inventory`, `catalog`, `local`,
-`static`); `shared` (router, hooks, UI kit); `features/storefront` and `features/seller`; `app` (composition root).
+`src/domain` (pure TypeScript rules) ← `ports` ← `adapters` (`http/stores`, `http/inventory`, `http/s3`, `catalog`,
+`local`, `static`); `shared` (router, hooks, UI kit); `features/storefront` and `features/seller`; `app` (composition root).
 The import table is in `docs/architecture.md` §2. The three rules that matter most:
 
 - Features never import `adapters/` or `app/`; they get ports through `useServices()`. Only `app/services.ts` builds adapters.
